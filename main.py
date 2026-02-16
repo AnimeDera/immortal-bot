@@ -1,67 +1,45 @@
 import os
-import asyncio
 from telethon import TelegramClient, events
 from flask import Flask, Response, render_template_string
 from threading import Thread
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 API_ID = 35954260
 API_HASH = '6a374885ad2cc311a8f0f49ebc5b0042'
 BOT_TOKEN = '8597292378:AAFTPjLoSEKyipw0nY5CJmbnbcoA69JHIEM'
-# Koyeb URL (बिना https:// के)
-DOMAIN = os.environ.get("CF_DOMAIN", "your-app.koyeb.app") 
+DOMAIN = os.environ.get("CF_DOMAIN")
 
 app = Flask(__name__)
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
-# 1. PLAYER HTML
-PLAYER_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Immortal Player</title>
-    <style>
-        body { margin: 0; background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; }
-        video { width: 95%; max-width: 800px; border: 2px solid red; border-radius: 10px; }
-    </style>
-</head>
-<body>
-    <video controls autoplay><source src="/stream/{{ file_id }}" type="video/mp4"></video>
-</body>
-</html>
-"""
+@client.on(events.NewMessage(func=lambda e: e.video or e.document))
+async def handle_media(event):
+    # यहाँ हम Message ID का उपयोग कर रहे हैं जो कभी फेल नहीं होती
+    msg_id = event.message.id
+    chat_id = event.chat_id
+    stream_url = f"https://{DOMAIN}/watch/{chat_id}/{msg_id}"
+    await event.reply(f"🎬 **Video is Ready to Stream!**\n\n**Link:** {stream_url}")
 
-# 2. BOT LOGIC (मैसेज सुनने के लिए)
-@client.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    await event.reply("I am Alive! Send me a video to get a streaming link.")
+@app.route('/watch/<chat_id>/<msg_id>')
+def watch(chat_id, msg_id):
+    return render_template_string("""
+        <html><head><title>Immortal Player</title></head>
+        <body style="margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;">
+        <video controls autoplay style="width:95%;max-width:850px;border:2px solid red;">
+        <source src="/stream/{{c}}/{{m}}" type="video/mp4"></video></body></html>
+    """, c=chat_id, m=msg_id)
 
-@client.on(events.NewMessage(func=lambda e: e.video))
-async def handle_video(event):
-    file_id = event.message.video.id
-    streaming_link = f"https://{DOMAIN}/watch/{file_id}"
-    await event.reply(f"✅ **Video Processed!**\n\n**Streaming Link:**\n{streaming_link}")
-
-# 3. STREAMING LOGIC
-@app.route('/watch/<file_id>')
-def watch(file_id):
-    return render_template_string(PLAYER_HTML, file_id=file_id)
-
-@app.route('/stream/<file_id>')
-async def stream_video(file_id):
-    # यह हिस्सा सीधा टेलीग्राम से डेटा खींचेगा
+@app.route('/stream/<chat_id>/<msg_id>')
+async def stream(chat_id, msg_id):
     async def generate():
-        async for chunk in client.download_iter(file_id):
-            yield chunk
+        async with client:
+            # यह हिस्सा टेलीग्राम से सीधा 'Live' डेटा खींचेगा
+            message = await client.get_messages(int(chat_id), ids=int(msg_id))
+            async for chunk in client.download_iter(message.media):
+                yield chunk
     return Response(generate(), mimetype='video/mp4')
 
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-
 if __name__ == '__main__':
-    t = Thread(target=run_flask)
-    t.start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
     client.start(bot_token=BOT_TOKEN)
-    print("Bot is listening...")
     client.run_until_disconnected()
