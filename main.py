@@ -12,13 +12,21 @@ DOMAIN = os.environ.get("CF_DOMAIN")
 app = Flask(__name__)
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
-@client.on(events.NewMessage(func=lambda e: e.video or e.document))
+# चैनल और प्राइवेट दोनों मैसेज के लिए
+@client.on(events.NewMessage(incoming=True))
 async def handle_media(event):
-    # यहाँ हम Message ID का उपयोग कर रहे हैं जो कभी फेल नहीं होती
-    msg_id = event.message.id
-    chat_id = event.chat_id
-    stream_url = f"https://{DOMAIN}/watch/{chat_id}/{msg_id}"
-    await event.reply(f"🎬 **Video is Ready to Stream!**\n\n**Link:** {stream_url}")
+    # अगर मैसेज में वीडियो या डॉक्यूमेंट है
+    if event.message.video or event.message.document:
+        msg_id = event.message.id
+        
+        # चैनल का ID निकालने का सही तरीका
+        if event.is_channel:
+            chat_id = event.chat_id
+        else:
+            chat_id = event.sender_id
+            
+        stream_url = f"https://{DOMAIN}/watch/{chat_id}/{msg_id}"
+        await event.reply(f"🎬 **Channel Video Ready!**\n\n**Link:** {stream_url}")
 
 @app.route('/watch/<chat_id>/<msg_id>')
 def watch(chat_id, msg_id):
@@ -33,8 +41,9 @@ def watch(chat_id, msg_id):
 async def stream(chat_id, msg_id):
     async def generate():
         async with client:
-            # यह हिस्सा टेलीग्राम से सीधा 'Live' डेटा खींचेगा
-            message = await client.get_messages(int(chat_id), ids=int(msg_id))
+            # -100 हटाना या जोड़ना पड़ सकता है, Telethon इसे खुद हैंडल करता है
+            entity = await client.get_input_entity(int(chat_id))
+            message = await client.get_messages(entity, ids=int(msg_id))
             async for chunk in client.download_iter(message.media):
                 yield chunk
     return Response(generate(), mimetype='video/mp4')
