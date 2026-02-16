@@ -1,6 +1,4 @@
-pyrogram
-tgcrypto
-motor
+telethon
+flask
 pymongo
-python-dotenv
-aiohttp
+cryptography
