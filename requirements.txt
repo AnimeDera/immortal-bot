@@ -2,3 +2,5 @@ telethon
 flask
 pymongo
 cryptography
+python-dotenv
+aiohttp
