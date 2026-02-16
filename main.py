@@ -1,66 +1,66 @@
-import hashlib
 import os
-import asyncio
-from pyrogram import Client, filters
-from dotenv import load_dotenv
-from database import db
-from aiohttp import web
+import re
+from telethon import TelegramClient
+from flask import Flask, Response, request, render_template_string
+from pymongo import MongoClient
 
-load_dotenv()
+# --- CONFIGURATION ---
+API_ID = 35954260
+API_HASH = '6a374885ad2cc311a8f0f49ebc5b0042'
+BOT_TOKEN = '8597292378:AAFTPjLoSEKyipw0nY5CJmbnbcoA69JHIEM'
+MONGO_URL = "mongodb+srv://dineshmotis226:dineshmotis226@cluster.6txxwre.mongodb.net/?appName=Cluster"
 
-# --- KOYEB PORT FIX (8080 Standard Port) ---
-async def handle(request):
-    return web.Response(text="Bot is Alive and Running on Standard Port 8080!")
+app = Flask(__name__)
+client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-async def start_web_server():
-    server = web.Application()
-    server.router.add_get("/", handle)
-    runner = web.AppRunner(server)
-    await runner.setup()
-    # यहाँ हमने 8080 सेट कर दिया है
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    print("🌍 Web Server started on standard port 8080")
+# HTML Player Template
+PLAYER_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Immortal Pro Player</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        .video-box { width: 95%; max-width: 850px; border: 1px solid #ff0000; border-radius: 10px; overflow: hidden; }
+        video { width: 100%; display: block; }
+        h1 { color: #ff0000; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <h1>IMMORTAL STREAMER</h1>
+    <div class="video-box">
+        <video controls autoplay preload="auto">
+            <source src="/stream/{{ file_id }}" type="video/mp4">
+        </video>
+    </div>
+</body>
+</html>
+"""
 
-# --- टेलीग्राम बॉट ---
-app = Client(
-    "ImmortalBot",
-    api_id=int(os.getenv("API_ID")),
-    api_hash=os.getenv("API_HASH"),
-    bot_token=os.getenv("BOT_TOKEN")
-)
+@app.route('/watch/<file_id>')
+def watch(file_id):
+    return render_template_string(PLAYER_HTML, file_id=file_id)
 
-def generate_hash(file_name):
-    return hashlib.md5(file_name.encode()).hexdigest()
-
-@app.on_message(filters.document | filters.video)
-async def process_video(client, message):
+@app.route('/stream/<file_id>')
+async def stream_video(file_id):
+    # यह हिस्सा टेलीग्राम से "Chunks" में डेटा खींचता है
     try:
-        msg = await message.reply("⚡️ प्रोसेसिंग शुरू हो रही है...")
-        file = message.document or message.video
-        file_name = file.file_name
-        file_hash = generate_hash(file_name)
+        # यहाँ हम File ID से मैसेज ढूंढते हैं
+        # नोट: असली बॉट में हम DB से मैसेज आईडी लेते हैं, 
+        # यहाँ हम सीधे फाइल आईडी को स्ट्रीम करने की कोशिश कर रहे हैं
+        file_msg = await client.get_messages(None, ids=int(file_id)) # सरलीकरण के लिए
         
-        storage_channel = int(os.getenv("CHANNEL_ID"))
-        copied_msg = await message.copy(storage_channel)
+        async def generate():
+            async for chunk in client.download_iter(file_msg.media):
+                yield chunk
         
-        file_data = {
-            "name": file_name,
-            "mirrors": [{"channel_id": storage_channel, "msg_id": copied_msg.id}]
-        }
-        await db.save_file(file_hash, file_data)
-        
-        final_link = f"{os.getenv('CF_DOMAIN')}/watch/{file_hash}"
-        await msg.edit(f"✅ **फाइल सुरक्षित सेव हो गई!**\n\n📂 नाम: `{file_name}`\n🔗 लिंक: {final_link}")
+        return Response(generate(), mimetype='video/mp4')
     except Exception as e:
-        print(f"Error: {e}")
+        return str(e), 500
 
-async def run_everything():
-    await start_web_server()
-    await app.start()
-    print("🚀 इम्मोर्टल बॉट ऑनलाइन है!")
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run_everything())
+if __name__ == '__main__':
+    # Koyeb requires port 8080 or the PORT env variable
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
